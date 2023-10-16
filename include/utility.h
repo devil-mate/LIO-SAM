@@ -252,13 +252,13 @@ public:
     sensor_msgs::Imu imuConverter(const sensor_msgs::Imu& imu_in)
     {
         sensor_msgs::Imu imu_out = imu_in;
-        // rotate acceleration
+        // rotate acceleration 加速度计-->线加速度
         Eigen::Vector3d acc(imu_in.linear_acceleration.x, imu_in.linear_acceleration.y, imu_in.linear_acceleration.z);
         acc = extRot * acc;
         imu_out.linear_acceleration.x = acc.x();
         imu_out.linear_acceleration.y = acc.y();
         imu_out.linear_acceleration.z = acc.z();
-        // rotate gyroscope
+        // rotate gyroscope  
         Eigen::Vector3d gyr(imu_in.angular_velocity.x, imu_in.angular_velocity.y, imu_in.angular_velocity.z);
         gyr = extRot * gyr;
         imu_out.angular_velocity.x = gyr.x();

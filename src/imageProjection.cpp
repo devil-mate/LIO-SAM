@@ -146,14 +146,17 @@ public:
 
     ~ImageProjection(){}
 
+    // imu原始测量数据转换到lidar系，加速度、角速度、RPY(三个角度，四元数表示)
     void imuHandler(const sensor_msgs::Imu::ConstPtr& imuMsg)
     {
+        // imuConverter在头文件utility.h中，作用是把imu数据转换到lidar坐标系?
         sensor_msgs::Imu thisImu = imuConverter(*imuMsg);
 
         std::lock_guard<std::mutex> lock1(imuLock);
         imuQueue.push_back(thisImu);
 
-        // debug IMU data
+        // debug IMU data  
+        // 调试信息
         // cout << std::setprecision(6);
         // cout << "IMU acc: " << endl;
         // cout << "x: " << thisImu.linear_acceleration.x << 
@@ -170,7 +173,8 @@ public:
         // cout << "IMU roll pitch yaw: " << endl;
         // cout << "roll: " << imuRoll << ", pitch: " << imuPitch << ", yaw: " << imuYaw << endl << endl;
     }
-
+    // 订阅imu里程计，由imuPreintegration积分计算得到的每时刻imu位姿.(地图优化程序中发布的)
+    //  初始的时候为0？？
     void odometryHandler(const nav_msgs::Odometry::ConstPtr& odometryMsg)
     {
         std::lock_guard<std::mutex> lock2(odoLock);
