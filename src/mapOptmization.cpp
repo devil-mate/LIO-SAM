@@ -251,7 +251,7 @@ public:
         if (timeLaserInfoCur - timeLastProcessing >= mappingProcessInterval)
         {
             timeLastProcessing = timeLaserInfoCur;
-
+            // 更新初始位姿(应该是基于前一帧的位置和姿态。)
             updateInitialGuess();
 
             extractSurroundingKeyFrames();
