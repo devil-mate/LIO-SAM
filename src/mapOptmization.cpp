@@ -120,7 +120,7 @@ public:
     pcl::KdTreeFLANN<PointType>::Ptr kdtreeHistoryKeyPoses;
 
     pcl::VoxelGrid<PointType> downSizeFilterCorner;
-    pcl::VoxelGrid<PointType> downSizeFilterSurf;
+    pcl::VoxelGrid<PointType> downSizeFilterSurf; // VoxelGrid： 一个常用的下采样滤波器类，它通过对点云数据进行体素（Voxel）划分来实现下采样
     pcl::VoxelGrid<PointType> downSizeFilterICP;
     pcl::VoxelGrid<PointType> downSizeFilterSurroundingKeyPoses; // for surrounding key poses of scan-to-map optimization
     
@@ -248,20 +248,21 @@ public:
         std::lock_guard<std::mutex> lock(mtx);
 
         static double timeLastProcessing = -1;
+        // 控制处理频率
         if (timeLaserInfoCur - timeLastProcessing >= mappingProcessInterval)
         {
             timeLastProcessing = timeLaserInfoCur;
             // 更新初始位姿(应该是基于前一帧的位置和姿态。)
             updateInitialGuess();
-
+            // 提取周围的关键帧，这些关键帧用于局部地图的构建和优化。
             extractSurroundingKeyFrames();
-
+            // 对当前扫描的点云进行下采样，以减少计算量，同时保持点云的几何特征。
             downsampleCurrentScan();
-
+            // 将当前扫描的点云与局部地图进行匹配和优化，以更新当前帧的位姿
             scan2MapOptimization();
-
+            // 保存关键帧和相关的因子（可能是指位姿图中的边或约束），用于后续的位姿图优化。    
             saveKeyFramesAndFactor();
-
+            // 对位姿进行校正，可能是基于全局优化或闭环检测的结果。
             correctPoses();
 
             publishOdometry();
