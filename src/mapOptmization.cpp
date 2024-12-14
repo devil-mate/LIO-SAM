@@ -262,7 +262,7 @@ public:
             scan2MapOptimization();
             // 保存关键帧和相关的因子（可能是指位姿图中的边或约束），用于后续的位姿图优化。    
             saveKeyFramesAndFactor();
-            // 对位姿进行校正，可能是基于全局优化或闭环检测的结果。
+            // (利用优化后的位姿/基于全局优化或闭环检测的结果)对位姿进行校正/更新路径信息。
             correctPoses();
 
             publishOdometry();
@@ -324,6 +324,8 @@ public:
 
     Eigen::Affine3f trans2Affine3f(float transformIn[])
     {
+        // 忽略最后一行的[0, 0, 0, 1]部分，因为仿射变换的最后一行通常是固定的？？或者是以特定顺序排列的平移和旋转参数。
+
         return pcl::getTransformation(transformIn[3], transformIn[4], transformIn[5], transformIn[0], transformIn[1], transformIn[2]);
     }
 
@@ -969,28 +971,33 @@ public:
 
     void updatePointAssociateToMap()
     {
+        // 构造了一个变换矩阵
         transPointAssociateToMap = trans2Affine3f(transformTobeMapped);
     }
 
     void cornerOptimization()
     {
+        // 应该是将传感器数据坐标变换到地图坐标； 只是更新了变换矩阵，以便后面使用
+        // transformTobeMapped 也是上一次优化后的结果，即优化后变换矩阵信息，
         updatePointAssociateToMap();
-
+        //  该指令使用OpenMP进行并行处理(函数并行遍历点云)
         #pragma omp parallel for num_threads(numberOfCores)
         for (int i = 0; i < laserCloudCornerLastDSNum; i++)
         {
             PointType pointOri, pointSel, coeff;
-            std::vector<int> pointSearchInd;
-            std::vector<float> pointSearchSqDis;
+            std::vector<int> pointSearchInd; // 最近邻搜索得到的点的索引。
+            std::vector<float> pointSearchSqDis; // 近邻搜索得到的点到查询点的平方距离
 
             pointOri = laserCloudCornerLastDS->points[i];
-            pointAssociateToMap(&pointOri, &pointSel);
+            pointAssociateToMap(&pointOri, &pointSel); // 使用上面更新的变换矩阵进行变换，将点变换到map
+            // 在kd树中搜索pointSel最近的点；KD树通过递归地分割空间来快速缩小搜索范围，从而找到与查询点最近的点
+            // 参数5，指定了想要找到的最近邻点的数量； 
             kdtreeCornerFromMap->nearestKSearch(pointSel, 5, pointSearchInd, pointSearchSqDis);
-
-            cv::Mat matA1(3, 3, CV_32F, cv::Scalar::all(0));
-            cv::Mat matD1(1, 3, CV_32F, cv::Scalar::all(0));
-            cv::Mat matV1(3, 3, CV_32F, cv::Scalar::all(0));
-                    
+            // 计算协方差矩阵和特征值
+            cv::Mat matA1(3, 3, CV_32F, cv::Scalar::all(0)); //协方差矩阵
+            cv::Mat matD1(1, 3, CV_32F, cv::Scalar::all(0));  //存储计算得到的协方差矩阵的特征值
+            cv::Mat matV1(3, 3, CV_32F, cv::Scalar::all(0));  //特征向量
+            // 最后一个元素也就是最远点，那么前面kd树搜索的结果也是按照顺序排列的 
             if (pointSearchSqDis[4] < 1.0) {
                 float cx = 0, cy = 0, cz = 0;
                 for (int j = 0; j < 5; j++) {
@@ -1015,11 +1022,11 @@ public:
                 matA1.at<float>(0, 0) = a11; matA1.at<float>(0, 1) = a12; matA1.at<float>(0, 2) = a13;
                 matA1.at<float>(1, 0) = a12; matA1.at<float>(1, 1) = a22; matA1.at<float>(1, 2) = a23;
                 matA1.at<float>(2, 0) = a13; matA1.at<float>(2, 1) = a23; matA1.at<float>(2, 2) = a33;
-
+                // 计算协方差矩阵的特征值和特征向量
                 cv::eigen(matA1, matD1, matV1);
-
+                // 通过比较协方差矩阵的最大特征值和次大特征值，如果它们之间的差异足够大(这里是3倍)，则认为该点是一个显著的角点。
                 if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1)) {
-
+                    // 对于显著的角点，计算一个基于特征向量的微小移动（通过乘以一个小系数0.1），
                     float x0 = pointSel.x;
                     float y0 = pointSel.y;
                     float z0 = pointSel.z;
@@ -1029,7 +1036,7 @@ public:
                     float x2 = cx - 0.1 * matV1.at<float>(0, 0);
                     float y2 = cy - 0.1 * matV1.at<float>(0, 1);
                     float z2 = cz - 0.1 * matV1.at<float>(0, 2);
-
+                    // 并计算这个移动构成的三角形的面积a012, 和边长l12
                     float a012 = sqrt(((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1)) * ((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1)) 
                                     + ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1)) * ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1)) 
                                     + ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1)) * ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1)));
@@ -1048,12 +1055,12 @@ public:
                     float ld2 = a012 / l12;
 
                     float s = 1 - 0.9 * fabs(ld2);
-
+                    // 利用上述信息，计算一个系数向量coeff，它包含了关于角点优化方向和大小的信息。
                     coeff.x = s * la;
                     coeff.y = s * lb;
                     coeff.z = s * lc;
                     coeff.intensity = s * ld2;
-
+                    // 如果这个优化的“显著性”（通过s来衡量）大于0.1，则将 原始点pointOri、优化系数coeff以及一个标志位（true）存储。
                     if (s > 0.1) {
                         laserCloudOriCornerVec[i] = pointOri;
                         coeffSelCornerVec[i] = coeff;
@@ -1179,7 +1186,7 @@ public:
         if (laserCloudSelNum < 50) {
             return false;
         }
-
+        // 这些是用于线性最小二乘求解的矩阵
         cv::Mat matA(laserCloudSelNum, 6, CV_32F, cv::Scalar::all(0));
         cv::Mat matAt(6, laserCloudSelNum, CV_32F, cv::Scalar::all(0));
         cv::Mat matAtA(6, 6, CV_32F, cv::Scalar::all(0));
@@ -1221,7 +1228,8 @@ public:
             matA.at<float>(i, 5) = coeff.y;
             matB.at<float>(i, 0) = -coeff.intensity;
         }
-
+        // 使用变换后的坐标和相应的系数（coeff），函数构建了一个线性系统（matA和matB），这个系统的解将是最优变换参数。
+        // 通过求解matAtA * X = matAtB，函数得到了最优变换参数的增量。
         cv::transpose(matA, matAt);
         matAtA = matAt * matA;
         matAtB = matAt * matB;
@@ -1229,6 +1237,7 @@ public:
 
         if (iterCount == 0) {
 
+            // matE、matV、matV2、matP这些矩阵用于特征值分解和处理退化情况。
             cv::Mat matE(1, 6, CV_32F, cv::Scalar::all(0));
             cv::Mat matV(6, 6, CV_32F, cv::Scalar::all(0));
             cv::Mat matV2(6, 6, CV_32F, cv::Scalar::all(0));
@@ -1257,7 +1266,8 @@ public:
             matX.copyTo(matX2);
             matX = matP * matX2;
         }
-
+        // 待优化的变换(6维，可能是旋转和平移)
+        // 使用求得的增量更新transformTobeMapped
         transformTobeMapped[0] += matX.at<float>(0, 0);
         transformTobeMapped[1] += matX.at<float>(1, 0);
         transformTobeMapped[2] += matX.at<float>(2, 0);
@@ -1294,10 +1304,10 @@ public:
             {
                 laserCloudOri->clear();
                 coeffSel->clear();
-
+                // 求得coeff系数，包括角点/面点 优化方向和大小信息
                 cornerOptimization();
                 surfOptimization();
-
+                // 放到coeffSel中，方便之后使用而已
                 combineOptimizationCoeffs();
 
                 if (LMOptimization(iterCount) == true)
